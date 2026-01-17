@@ -7,41 +7,30 @@
 
 #include <toppra/constraint/joint_torque.hpp>
 
-// For inverse dynamics, we need an additional library
-// Option 1: KDL (Kinematics and Dynamics Library)
-#ifdef BUILD_WITH_KDL
+// KDL (Kinematics and Dynamics Library) is a dependency of Tesseract
+// and provides inverse dynamics computation via RNEA algorithm
 #include <kdl/tree.hpp>
 #include <kdl/treeidsolver_recursive_newton_euler.hpp>
 #include <kdl/jntarray.hpp>
-#endif
-
-// Option 2: Drake (more comprehensive but heavier)
-#ifdef BUILD_WITH_DRAKE
-#include <drake/multibody/plant/multibody_plant.h>
-#include <drake/multibody/parsing/parser.h>
-#endif
 
 namespace toppra {
 namespace constraint {
 namespace jointTorque {
 
-/** Implementation of JointTorque using Tesseract + dynamics library.
+/** Implementation of JointTorque using Tesseract + KDL.
  * \extends JointTorque
  *
- * This class uses Tesseract for robot model management and an additional
- * library (KDL or Drake) for inverse dynamics computation.
+ * This class uses Tesseract for robot model management and KDL
+ * (Kinematics and Dynamics Library) for inverse dynamics computation.
  *
- * Note: Tesseract focuses on motion planning and kinematics. For dynamics,
- * it's recommended to use KDL (lighter) or Drake (more comprehensive).
+ * KDL is already a dependency of Tesseract, making this a perfect fit
+ * for dynamics calculations without additional dependencies.
  */
-
-#ifdef BUILD_WITH_KDL
-
 template<typename Environment = tesseract_environment::Environment>
-class TesseractKDL;
+class Tesseract;
 
 template<typename _Environment>
-class TesseractKDL : public JointTorque {
+class Tesseract : public JointTorque {
   public:
     typedef _Environment Environment;
     typedef std::shared_ptr<Environment> EnvironmentPtr;
@@ -98,11 +87,11 @@ class TesseractKDL : public JointTorque {
      * \param torque_limits Joint torque limits (optional, extracted from URDF if empty)
      * \param frictionCoeffs Friction coefficients
      */
-    TesseractKDL (EnvironmentPtr env,
-                  const KDL::Tree& kdl_tree,
-                  const std::string& manipulator_name,
-                  const Vector& torque_limits = Vector(),
-                  const Vector& frictionCoeffs = Vector())
+    Tesseract (EnvironmentPtr env,
+               const KDL::Tree& kdl_tree,
+               const std::string& manipulator_name,
+               const Vector& torque_limits = Vector(),
+               const Vector& frictionCoeffs = Vector())
       : JointTorque (computeTorqueLimits(env, manipulator_name, torque_limits, true),
                      computeTorqueLimits(env, manipulator_name, torque_limits, false),
                      frictionCoeffs)
@@ -114,7 +103,7 @@ class TesseractKDL : public JointTorque {
     }
 
     /// Move-assignment operator
-    TesseractKDL (TesseractKDL&& other)
+    Tesseract (Tesseract&& other)
       : JointTorque(other)
       , env_ (std::move(other.env_))
       , kdl_tree_ (other.kdl_tree_)
@@ -167,45 +156,7 @@ class TesseractKDL : public JointTorque {
     KDL::Tree kdl_tree_;
     std::unique_ptr<KDL::TreeIdSolver_RNE> id_solver_;
     std::string manipulator_name_;
-}; // class TesseractKDL
-
-// Typedef for convenience
-template<typename Environment = tesseract_environment::Environment>
-using Tesseract = TesseractKDL<Environment>;
-
-#endif // BUILD_WITH_KDL
-
-#ifdef BUILD_WITH_DRAKE
-
-// Alternative implementation using Drake
-template<typename Environment = tesseract_environment::Environment>
-class TesseractDrake : public JointTorque {
-  public:
-    typedef _Environment Environment;
-    typedef std::shared_ptr<Environment> EnvironmentPtr;
-
-    std::ostream& print(std::ostream& os) const
-    {
-      return JointTorque::print(os << "Tesseract-Drake - ");
-    }
-
-    void computeInverseDynamics (const Vector& q, const Vector& v, const Vector& a,
-        Vector& tau)
-    {
-      // Drake implementation
-      // This would use drake::multibody::MultibodyPlant::CalcInverseDynamics
-      // Implementation details depend on Drake version and setup
-      throw std::runtime_error("Drake implementation not yet complete");
-    }
-
-    // Constructor and other methods...
-
-  private:
-    EnvironmentPtr env_;
-    std::unique_ptr<drake::multibody::MultibodyPlant<double>> plant_;
-};
-
-#endif // BUILD_WITH_DRAKE
+}; // class Tesseract
 
 } // namespace jointTorque
 } // namespace constraint

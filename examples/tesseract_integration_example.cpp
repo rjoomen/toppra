@@ -13,16 +13,16 @@
 
 #ifdef BUILD_WITH_TESSERACT
 #include <toppra/constraint/cartesian_velocity_norm/tesseract.hpp>
-#ifdef BUILD_WITH_KDL
 #include <toppra/constraint/joint_torque/tesseract.hpp>
-#include <kdl/tree.hpp>
-#include <kdl_parser/kdl_parser.hpp>
-#endif
 
 #include <tesseract_environment/environment.h>
 #include <tesseract_environment/utils.h>
 #include <tesseract_urdf/urdf_parser.h>
 #include <tesseract_scene_graph/graph.h>
+
+// KDL is a dependency of Tesseract, used for inverse dynamics
+#include <kdl/tree.hpp>
+#include <kdl_parser/kdl_parser.hpp>
 #endif
 
 #include <iostream>
@@ -138,8 +138,8 @@ int main(int argc, char** argv) {
   constraints.push_back(cart_vel_constraint);
   std::cout << "Added Cartesian velocity constraint (Tesseract)" << std::endl;
 
-#ifdef BUILD_WITH_KDL
   // 3d. Joint torque constraint using Tesseract + KDL
+  // KDL is already a dependency of Tesseract
   // First, create KDL tree from URDF
   KDL::Tree kdl_tree;
   if (!kdl_parser::treeFromString(urdf_string, kdl_tree)) {
@@ -156,7 +156,6 @@ int main(int argc, char** argv) {
 
   constraints.push_back(torque_constraint);
   std::cout << "Added joint torque constraint (Tesseract + KDL)" << std::endl;
-#endif
 
   // ============================================================================
   // Step 4: Set up and run TOPP-RA algorithm

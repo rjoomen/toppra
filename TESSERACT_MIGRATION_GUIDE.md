@@ -29,21 +29,15 @@ TOPP-RA currently uses Pinocchio for:
 tau = pinocchio::rnea(model, data, q, v, a);
 ```
 
-**Tesseract approach:**
-Tesseract doesn't have a built-in RNEA implementation. You have two options:
-
-#### Option A: Use Tesseract with external dynamics library
-Combine Tesseract for kinematics with another library for dynamics:
-- Use **KDL** (Kinematics and Dynamics Library) for dynamics
-- Use **RBDL** (Rigid Body Dynamics Library)
-- Use **Drake** for multibody dynamics
-
-#### Option B: Implement custom inverse dynamics
-If you have access to the mass matrix, Coriolis, and gravity terms:
+**Tesseract + KDL approach:**
+Tesseract doesn't have built-in dynamics, but since KDL is already a dependency of Tesseract, we use it for inverse dynamics:
 ```cpp
-// Tesseract can provide kinematic information
-// You'll need to compute: tau = M(q)*a + C(q,v)*v + g(q)
+// KDL is already available as a Tesseract dependency
+KDL::TreeIdSolver_RNE id_solver(kdl_tree, gravity);
+id_solver.CartToJnt(q_kdl, v_kdl, a_kdl, f_ext, tau_kdl);
 ```
+
+This is a perfect fit - no additional dependencies needed!
 
 ### 2. Cartesian Velocity Constraint (Forward Kinematics)
 
@@ -67,12 +61,14 @@ Eigen::VectorXd v = jacobian * qdot;
 
 ## Implementation Structure
 
-### For Joint Torque Constraint with Tesseract + KDL:
+### Joint Torque Constraint with Tesseract + KDL
+
+Since KDL is already a dependency of Tesseract, the implementation is straightforward:
 
 ```cpp
 #include <tesseract_environment/environment.h>
 #include <tesseract_kinematics/core/kinematic_group.h>
-#include <kdl/treeinvsolver.hpp>
+#include <kdl/tree.hpp>
 #include <kdl/treeidsolver_recursive_newton_euler.hpp>
 
 namespace toppra {
@@ -84,21 +80,29 @@ class Tesseract : public JointTorque {
   public:
     void computeInverseDynamics(const Vector& q, const Vector& v, const Vector& a,
                                 Vector& tau) override {
-      // Convert to KDL types
-      KDL::JntArray q_kdl, v_kdl, a_kdl, tau_kdl;
-      // ... conversion code ...
+      // Convert Eigen to KDL
+      KDL::JntArray q_kdl(q.size()), v_kdl(v.size()), a_kdl(a.size());
+      for (int i = 0; i < q.size(); ++i) {
+        q_kdl(i) = q[i];
+        v_kdl(i) = v[i];
+        a_kdl(i) = a[i];
+      }
 
-      // Compute inverse dynamics using KDL
-      id_solver_->CartToJnt(q_kdl, v_kdl, a_kdl,
-                            KDL::Wrenches(), tau_kdl);
+      // Compute inverse dynamics using KDL's RNEA
+      KDL::JntArray tau_kdl(tau.size());
+      KDL::Wrenches f_ext(kdl_tree_.getNrOfSegments(), KDL::Wrench::Zero());
+      id_solver_->CartToJnt(q_kdl, v_kdl, a_kdl, f_ext, tau_kdl);
 
       // Convert back to Eigen
-      // ... conversion code ...
+      for (int i = 0; i < tau.size(); ++i) {
+        tau[i] = tau_kdl(i);
+      }
     }
 
   private:
     std::shared_ptr<Environment> env_;
-    std::shared_ptr<KDL::TreeIdSolver_RNE> id_solver_;
+    KDL::Tree kdl_tree_;
+    std::unique_ptr<KDL::TreeIdSolver_RNE> id_solver_;
 };
 
 } // namespace jointTorque
@@ -172,9 +176,11 @@ if(BUILD_WITH_TESSERACT)
     find_package(tesseract_environment REQUIRED)
     find_package(tesseract_kinematics REQUIRED)
     find_package(tesseract_urdf REQUIRED)
-    # If using KDL for dynamics:
+    find_package(tesseract_scene_graph REQUIRED)
+    # KDL is a dependency of Tesseract - just need kdl_parser for URDF parsing
     find_package(orocos_kdl REQUIRED)
-    message(STATUS "Found Tesseract")
+    find_package(kdl_parser REQUIRED)
+    message(STATUS "Found Tesseract with KDL")
 endif()
 ```
 
@@ -182,28 +188,23 @@ endif()
 
 ### Best Approach for TOPP-RA + Tesseract Integration:
 
-1. **For Cartesian Velocity Constraints**: Use Tesseract directly (straightforward replacement)
-   - Tesseract's Jacobian computation works well for this
+Since **KDL is already a dependency of Tesseract**, the integration is seamless:
 
-2. **For Joint Torque Constraints**: Consider one of these options:
-   - **Option A (Recommended)**: Tesseract + KDL for dynamics
-     - Pros: KDL is well-tested, ROS ecosystem compatible
-     - Cons: Additional dependency
+1. **For Cartesian Velocity Constraints**: Use Tesseract directly
+   - Tesseract's Jacobian computation via `KinematicGroup::calcJacobian()`
+   - No additional dependencies needed
 
-   - **Option B**: Tesseract + Drake
-     - Pros: Modern, well-maintained, comprehensive dynamics
-     - Cons: Heavier dependency
+2. **For Joint Torque Constraints**: Use Tesseract + KDL
+   - KDL is already included with Tesseract
+   - KDL's `TreeIdSolver_RNE` provides RNEA inverse dynamics
+   - Just need to add `kdl_parser` for URDF to KDL tree conversion
+   - Perfect fit - well-tested, ROS ecosystem compatible
 
-   - **Option C**: Keep Pinocchio for dynamics only
-     - Pros: Already working, efficient RNEA implementation
-     - Cons: Mixed dependencies
+### Recommended Approach:
 
-### Suggested Hybrid Approach:
-
-For minimal changes and maximum compatibility with Tesseract:
 - Use **Tesseract** for all kinematics (scene management, collision, path planning)
-- Use **KDL** for inverse dynamics (it's already a dependency in many ROS systems)
-- Create Tesseract-based constraint classes that leverage both
+- Use **KDL** for inverse dynamics (already available as a Tesseract dependency)
+- Single, cohesive framework - no mixed dependencies needed!
 
 ## Testing
 
@@ -214,15 +215,16 @@ Update test files to use Tesseract:
 
 ## Next Steps
 
-1. Choose your dynamics library (KDL recommended for ROS ecosystem)
-2. Implement `tesseract.hpp` files for both constraints
-3. Update CMake configuration
-4. Create/update tests
-5. Update documentation
+1. The `tesseract.hpp` files are already implemented for both constraints
+2. Update your CMake configuration to include Tesseract and kdl_parser
+3. Build with `-DBUILD_WITH_TESSERACT=ON`
+4. Test with your robot model
+5. Enjoy seamless integration!
 
-## Questions to Consider
+## Benefits of This Approach
 
-1. **Do you need full inverse dynamics?** Or just gravity compensation?
-2. **Is KDL acceptable as a dependency?** It's common in ROS environments
-3. **Do you need real-time performance?** This may influence library choice
-4. **Will you use Tesseract's collision checking?** This could influence integration strategy
+1. **Single framework**: Tesseract + KDL work together seamlessly
+2. **No additional dependencies**: KDL is already part of Tesseract
+3. **ROS ecosystem compatible**: Both widely used in ROS
+4. **Well-tested**: KDL's RNEA implementation is mature and reliable
+5. **Clean integration**: Tesseract for planning, KDL for dynamics

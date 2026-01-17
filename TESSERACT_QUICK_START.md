@@ -25,70 +25,45 @@ This guide provides a practical workflow for replacing Pinocchio with Tesseract 
 
 ## Recommended Approach
 
-### Option 1: Tesseract + KDL (Recommended for ROS)
+### Tesseract + KDL (Single Integrated Solution)
+
+**Great News:** KDL is already a dependency of Tesseract, so there are no additional dependencies needed!
 
 **Pros:**
-- KDL is widely used in ROS ecosystem
-- Lightweight dependency
-- Well-tested inverse dynamics
+- KDL already included with Tesseract - zero additional dependencies
+- Widely used in ROS ecosystem
+- Well-tested inverse dynamics (RNEA algorithm)
 - Compatible with MoveIt and Tesseract
+- Clean, cohesive integration
 
-**Cons:**
-- Need to maintain both Tesseract and KDL trees
+**What you get:**
+- Full kinematics from Tesseract
+- Full dynamics from KDL (which comes with Tesseract)
+- Both Cartesian velocity and joint torque constraints
+- Scene management, collision checking, and path planning capabilities
 
-**Use case:** If you're already using ROS or need ROS compatibility
-
-### Option 2: Tesseract Only (Kinematics Only)
-
-**Pros:**
-- Single dependency
-- Clean integration with Tesseract ecosystem
-
-**Cons:**
-- No inverse dynamics (can't use joint torque constraints)
-- Limited to kinematic constraints
-
-**Use case:** If you only need Cartesian velocity constraints
-
-### Option 3: Hybrid (Tesseract + Pinocchio)
-
-**Pros:**
-- Use Tesseract for planning, Pinocchio for dynamics
-- Minimal code changes
-- Best of both worlds
-
-**Cons:**
-- Multiple dependencies
-- Need to keep models synchronized
-
-**Use case:** If you need both Tesseract's planning features and efficient dynamics
+**Use case:** Everyone integrating TOPP-RA with Tesseract - this is the recommended approach!
 
 ## Build Instructions
 
 ### Install Dependencies
 
-#### For Tesseract:
+#### For Tesseract (includes KDL):
 ```bash
 # ROS 2 users (recommended):
 sudo apt install ros-${ROS_DISTRO}-tesseract-environment \
                  ros-${ROS_DISTRO}-tesseract-kinematics \
                  ros-${ROS_DISTRO}-tesseract-urdf \
-                 ros-${ROS_DISTRO}-tesseract-scene-graph
+                 ros-${ROS_DISTRO}-tesseract-scene-graph \
+                 ros-${ROS_DISTRO}-kdl-parser
 
 # Or from source:
 git clone https://github.com/tesseract-robotics/tesseract.git
 cd tesseract
 colcon build
-```
 
-#### For KDL (if using joint torque constraints):
-```bash
-# ROS 2 users:
-sudo apt install ros-${ROS_DISTRO}-orocos-kdl \
-                 ros-${ROS_DISTRO}-kdl-parser
-
-# Or:
-sudo apt install liborocos-kdl-dev
+# Note: KDL (orocos_kdl) is already a dependency of Tesseract and will be
+# installed automatically. You just need kdl_parser for URDF conversion.
 ```
 
 ### Build TOPP-RA with Tesseract
@@ -97,10 +72,9 @@ sudo apt install liborocos-kdl-dev
 cd toppra/cpp
 mkdir -p build && cd build
 
-# Build with Tesseract support:
+# Build with Tesseract support (KDL is included):
 cmake .. \
   -DBUILD_WITH_TESSERACT=ON \
-  -DBUILD_WITH_KDL=ON \
   -DCMAKE_PREFIX_PATH=/opt/ros/${ROS_DISTRO}
 
 make -j$(nproc)
@@ -113,7 +87,6 @@ Add to your `cpp/CMakeLists.txt`:
 ```cmake
 # Add Tesseract option
 option(BUILD_WITH_TESSERACT "Compile with Tesseract library" OFF)
-option(BUILD_WITH_KDL "Compile with KDL for dynamics" OFF)
 
 # Find packages
 if(BUILD_WITH_TESSERACT)
@@ -121,13 +94,10 @@ if(BUILD_WITH_TESSERACT)
   find_package(tesseract_kinematics REQUIRED)
   find_package(tesseract_urdf REQUIRED)
   find_package(tesseract_scene_graph REQUIRED)
-  message(STATUS "Found Tesseract")
-
-  if(BUILD_WITH_KDL)
-    find_package(orocos_kdl REQUIRED)
-    find_package(kdl_parser REQUIRED)
-    message(STATUS "Found KDL for dynamics")
-  endif()
+  # KDL is a dependency of Tesseract - just need kdl_parser
+  find_package(orocos_kdl REQUIRED)
+  find_package(kdl_parser REQUIRED)
+  message(STATUS "Found Tesseract with KDL")
 endif()
 ```
 
@@ -140,16 +110,9 @@ if(BUILD_WITH_TESSERACT)
     tesseract::tesseract_kinematics
     tesseract::tesseract_scene_graph
     tesseract::tesseract_urdf
+    orocos-kdl
+    kdl_parser
   )
-
-  if(BUILD_WITH_KDL)
-    target_link_libraries(toppra PUBLIC
-      orocos-kdl
-      kdl_parser
-    )
-    target_compile_definitions(toppra PUBLIC BUILD_WITH_KDL)
-  endif()
-
   target_compile_definitions(toppra PUBLIC BUILD_WITH_TESSERACT)
 endif()
 ```
@@ -236,14 +199,20 @@ auto constraint =
 ### After (Tesseract + KDL):
 ```cpp
 #include <toppra/constraint/joint_torque/tesseract.hpp>
+#include <tesseract_environment/environment.h>
+#include <tesseract_urdf/urdf_parser.h>
+#include <kdl_parser/kdl_parser.hpp>
 
+// Create Tesseract environment
 auto env = std::make_shared<tesseract_environment::Environment>();
 auto scene_graph = tesseract_urdf::parseURDFFile(urdf_file);
 env->init(scene_graph);
 
+// Create KDL tree (KDL is already a Tesseract dependency)
 KDL::Tree kdl_tree;
 kdl_parser::treeFromFile(urdf_file, kdl_tree);
 
+// Create constraint
 auto constraint =
     std::make_shared<toppra::constraint::jointTorque::Tesseract<>>(
         env, kdl_tree, "manipulator", torque_limits, friction_coeffs);
